@@ -51,23 +51,25 @@ echo -e "\r\n\t${eraseP//?/*}"
 echo -e "\t${eraseP}"
 echo -e "\t${eraseP//?/*}\r\n"
 diskutil eraseDisk exFAT "WIN10" GPT /dev/disk${diskNum}
+echo -e "\r\n"
 
 # Mount the Win10_22H2_English_x64.iso file
 mountP="***   MOUNTING THE ISO FILE   ***"
 echo -e "\r\n\t${mountP//?/*}"
 echo -e "\t${mountP}"
 echo -e "\t${mountP//?/*}\r\n"
-hdiutil mount Win10_22H2_English_x64.iso
+hdiutil attach ~/Downloads/$WIN_FILE
+echo -e "\r\n"
 
 # Copy the contents of the mounted Win10_22H2_English_x64.iso file to the selected disk
 copyP="***   COPYING THE ISO FILE TO THE SELECTED DISK   ***"
 echo -e "\r\n\t${copyP//?/*}"
 echo -e "\t${copyP}"
 echo -e "\t${copyP//?/*}\r\n"
-sudo rsync -av --progress /Volumes/Win10_22H2_English_x64/ /Volumes/WIN10/
+sudo rsync -av --progress /Volumes/CCCOMA_X64FRE_EN-US_DV9/ /Volumes/WIN10/
 
-# Unmount the Win10_22H2_English_x64.iso file
-hdiutil unmount /Volumes/Win10_22H2_English_x64
+# Unmount the iso file
+hdiutil unmount /Volumes/CCCOMA_X64FRE_EN-US_DV9
 
 # Exit the script
 exit 0
