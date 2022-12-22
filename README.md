@@ -2,4 +2,4 @@
 
  Prerequisites:
  - Download the Windows ISO from Microsoft
- - Place the ISO in the same directory as this script
+ - Make sure the ISO is in the Downloads folder
