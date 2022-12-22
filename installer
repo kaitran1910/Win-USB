@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+# Make sure the Win10_22H2_English_x64.iso file is in the same directory as this script
+if [ ! -f "Win10_22H2_English_x64.iso" ]; then
+	echo -e "\r\nWin10_22H2_English_x64.iso IS NOT IN THE SAME DIRECTORY AS THIS SCRIPT!"
+	echo -e "MAKE SURE YOU HAVE THE ISO FILE IN THE SAME DIRECTORY AS THIS SCRIPT!\r\n"
+	exit 0
+fi
+
+# Tell the user what we are doing
+listP="***   LISTING ALL THE DISKS   ***"
+echo -e "\r\n\t${listP//?/*}"
+echo -e "\t${listP}"
+echo -e "\t${listP//?/*}\r\n"
+# Execute the diskutil command to list all the disks
+diskutil list
+
+# Ask the user to select the usb disk to install the OS on
+echo -e "\r\nEXTRA CAREFUL! THIS WILL ERASE THE SELECTED DISK!"
+echo -e "e.g: If you want /dev/disk2, enter 2\r\n"
+read -p "ENTER THE DSIRED USB DISK : " diskNum
+# If the user input is empty, prompt the user to enter the disk number again
+while [ -z "$diskNum" ]
+do
+	echo -e "Please enter the right format!\r\n"
+	read -p "ENTER THE DSIRED USB DISK : " diskNum
+done
+
+# Check the Disk Size, if it's more than 256GB, double check with the user
+diskSize=$(diskutil info /dev/disk${diskNum} | grep "Disk Size" | awk '{print $5}' | sed 's/(//g')
+diskSizeGB=$(echo "scale=2; $diskSize/1000000000" | bc)
+echo -e "SELECTED: /dev/disk${diskNum} \t SIZE ${diskSizeGB}GB\r\n"
+if [ $diskSize -gt 256000000000 ]; then
+	echo -e "The selected disk size is more than 256GB!\r\n"
+	read -p "Are you sure you want to continue? (y/n) : " confirm
+	while [ -z "$confirm" ]
+	do
+		echo -e "Please enter y or n!\r\n"
+		echo -e "The selected disk size is more than 256GB!\r\n"
+		read -p "Are you sure you want to continue? (y/n) : " confirm
+	done
+	if [ $confirm == "n" ]; then
+		echo -e "Exiting the script!\r\n"
+		exit 0
+	fi
+fi
+
+# Erase the disk with exFAT GPT format and name it "WIN10"
+eraseP="***   ERASING THE SELECTED DISK   ***"
+echo -e "\r\n\t${eraseP//?/*}"
+echo -e "\t${eraseP}"
+echo -e "\t${eraseP//?/*}\r\n"
+diskutil eraseDisk exFAT "WIN10" GPT /dev/disk${diskNum}
+
+# Mount the Win10_22H2_English_x64.iso file
+mountP="***   MOUNTING THE ISO FILE   ***"
+echo -e "\r\n\t${mountP//?/*}"
+echo -e "\t${mountP}"
+echo -e "\t${mountP//?/*}\r\n"
+hdiutil mount Win10_22H2_English_x64.iso
+
+# Copy the contents of the mounted Win10_22H2_English_x64.iso file to the selected disk
+copyP="***   COPYING THE ISO FILE TO THE SELECTED DISK   ***"
+echo -e "\r\n\t${copyP//?/*}"
+echo -e "\t${copyP}"
+echo -e "\t${copyP//?/*}\r\n"
+sudo rsync -av --progress /Volumes/Win10_22H2_English_x64/ /Volumes/WIN10/
+
+# Unmount the Win10_22H2_English_x64.iso file
+hdiutil unmount /Volumes/Win10_22H2_English_x64
+
+# Exit the script
+exit 0
