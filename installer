@@ -1,21 +1,60 @@
 #!/usr/bin/env bash
 
-# Function to check if the Windows ISO file exists
+# Function to check if a file exists
 check_file() {
     local file_path=$1
     if [[ ! -f $file_path ]]; then
-        echo -e "The file $WIN_FILE does not exist at $file_path\r\n"
+        echo -e "The file does not exist at $file_path\r\n"
         return 1
     fi
     return 0
 }
 
+# Function to find Windows ISO files
+find_iso_files() {
+    local search_dir=$1
+    find "$search_dir" -maxdepth 1 -type f -name "*.iso" -print0 | xargs -0 -I {} basename "{}"
+}
+
+# Function to select an ISO file
+select_iso_file() {
+    local search_dir=$1
+    local iso_files=($(find_iso_files "$search_dir"))
+
+    if [ ${#iso_files[@]} -eq 0 ]; then
+        echo "No ISO files found in $search_dir"
+        return 1
+    fi
+
+    echo "Available ISO files:"
+    for i in "${!iso_files[@]}"; do
+        echo "$((i + 1)). ${iso_files[i]}"
+    done
+
+    while true; do
+        read -p "Select an ISO file (1-${#iso_files[@]}) or enter a custom path: " selection
+        if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "${#iso_files[@]}" ]; then
+            WIN_FILE="${iso_files[$((selection - 1))]}"
+            WIN_PATH="$search_dir/$WIN_FILE"
+            break
+        elif [ -f "$selection" ]; then
+            WIN_PATH="$selection"
+            WIN_FILE=$(basename "$WIN_PATH")
+            break
+        else
+            echo "Invalid selection. Please try again."
+        fi
+    done
+}
+
 # Function to validate the disk number entered by the user
 validate_disk() {
-    while : ; do
-        read -p "ENTER THE DESIRED USB DISK: " diskNum
+    while :; do
+        read -p "Enter the desired USB disk number: " diskNum
         if [[ -z "$diskNum" || ! "$diskNum" =~ ^[0-9]+$ ]]; then
             echo -e "Invalid input. Please enter the disk number.\r\n"
+        elif ! diskutil info disk${diskNum} &>/dev/null; then
+            echo -e "Disk ${diskNum} does not exist. Please enter a valid disk number.\r\n"
         else
             break
         fi
@@ -26,7 +65,7 @@ validate_disk() {
 erase_disk() {
     local diskNum=$1
     echo -e "\r\n\t***   ERASING THE SELECTED DISK   ***\r\n"
-    diskutil eraseDisk exFAT "WIN10" GPT /dev/disk${diskNum}
+    diskutil eraseDisk exFAT "WINUSB" GPT /dev/disk${diskNum}
     echo -e "\r\n"
 }
 
@@ -34,37 +73,64 @@ erase_disk() {
 mount_iso() {
     local iso_path=$1
     echo -e "\r\n\t***   MOUNTING THE ISO FILE   ***\r\n"
-    hdiutil attach $iso_path
+    hdiutil attach "$iso_path"
     echo -e "\r\n"
 }
 
 # Function to copy the contents of the mounted ISO file to the selected disk
 copy_contents() {
-    sudo rsync -av --progress /Volumes/CCCOMA_X64FRE_EN-US_DV9/ /Volumes/WIN10/
+    local source_volume=$(ls -d /Volumes/CCCOMA_X64* /Volumes/WIN* 2>/dev/null | head -n 1)
+    if [ -z "$source_volume" ]; then
+        echo "Error: Could not find the mounted Windows ISO volume."
+        return 1
+    fi
+    echo -e "\r\n\t***   COPYING FILES TO USB   ***\r\n"
+    sudo rsync -av --progress "$source_volume/" /Volumes/WINUSB/
 }
 
-# Initial file check
-WIN_FILE="Win10_22H2_English_x64.iso"
-DEFAULT_PATH=~/Downloads/$WIN_FILE
-check_file $DEFAULT_PATH
+# Function to verify the ISO file
+verify_iso() {
+    local iso_path=$1
+    echo -e "\r\n\t***   VERIFYING ISO FILE   ***\r\n"
+    local iso_info=$(hdiutil verify "$iso_path" 2>&1)
+    if [[ $iso_info == *"verify ok"* ]]; then
+        echo "ISO file verified successfully."
+        return 0
+    else
+        echo "ISO file verification failed. The file might be corrupted."
+        return 1
+    fi
+}
 
-# Prompt user for file path if not found
-if [[ $? -ne 0 ]]; then
-    read -p "Please provide the full path to $WIN_FILE: " user_path
-    check_file $user_path
-    if [[ $? -ne 0 ]]; then
-        echo -e "Exiting the script!\r\n"
+# Main script starts here
+echo "Welcome to the Windows USB Installer Script"
+echo "This script will create a bootable Windows USB drive"
+
+# Find and select ISO file
+DEFAULT_PATH=~/Downloads
+select_iso_file "$DEFAULT_PATH"
+
+if [ $? -ne 0 ]; then
+    echo -e "No ISO file selected. Exiting the script.\r\n"
+    exit 1
+fi
+
+echo -e "\r\nSelected Windows ISO: $WIN_FILE"
+
+# Verify the ISO file
+verify_iso "$WIN_PATH"
+if [ $? -ne 0 ]; then
+    read -p "Do you want to continue anyway? (y/n): " continue_anyway
+    if [[ ! $continue_anyway =~ ^[Yy]$ ]]; then
+        echo "Exiting the script."
         exit 1
     fi
-    WIN_PATH=$user_path
-else
-    WIN_PATH=$DEFAULT_PATH
 fi
 
 # Disk selection and validation
 echo -e "\r\n\t***   LISTING ALL THE DISKS   ***\r\n"
 diskutil list
-echo -e "\r\nEXTRA CAREFUL! THIS WILL ERASE THE SELECTED DISK!"
+echo -e "\r\nWARNING: This will erase the selected disk!"
 validate_disk
 
 # Disk size check
@@ -72,15 +138,14 @@ diskSize=$(diskutil info /dev/disk${diskNum} | grep "Disk Size" | awk '{print $5
 diskSizeGB=$(echo "scale=2; $diskSize/1000000000" | bc)
 diskSizeGB_int=${diskSizeGB%.*}
 echo -e "SELECTED: /dev/disk${diskNum} \t SIZE ${diskSizeGB}GB\r\n"
-if (( diskSizeGB_int > 256 )); then
+if ((diskSizeGB_int > 256)); then
     echo -e "The selected disk size is more than 256GB!\r\n"
     read -p "Are you sure you want to continue? (y/n) : " confirm
-    while [[ -z "$confirm" || ! "$confirm" =~ ^(y|n)$ ]]; do
+    while [[ ! "$confirm" =~ ^[YyNn]$ ]]; do
         echo -e "Please enter y or n!\r\n"
-        echo -e "The selected disk size is more than 256GB!\r\n"
         read -p "Are you sure you want to continue? (y/n) : " confirm
     done
-    if [[ $confirm == "n" ]]; then
+    if [[ $confirm =~ ^[Nn]$ ]]; then
         echo -e "Exiting the script!\r\n"
         exit 0
     fi
@@ -88,11 +153,17 @@ fi
 
 # Erase disk, mount ISO, and copy contents
 erase_disk $diskNum
-mount_iso $WIN_PATH
+mount_iso "$WIN_PATH"
 copy_contents
+
+if [ $? -ne 0 ]; then
+    echo "Error occurred during file copy. Please check the ISO file and try again."
+    exit 1
+fi
 
 # Unmount the iso file and exit
 echo -e "\r\n\t***   UNMOUNTING THE ISO FILE   ***\r\n"
-hdiutil unmount /Volumes/CCCOMA_X64FRE_EN-US_DV9
+hdiutil unmount $(ls -d /Volumes/CCCOMA_X64* /Volumes/WIN* 2>/dev/null | head -n 1)
 echo -e "Process completed successfully!\r\n"
+echo "Your bootable Windows USB drive is now ready."
 exit 0
